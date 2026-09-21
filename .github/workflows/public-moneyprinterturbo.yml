@@ -22,15 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Mark deployment started
-        run: |
-          echo "STARTED" > ONLINE_STATUS.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ONLINE_STATUS.txt
-          git commit -m "MoneyPrinterTurbo online deployment started" || true
-          git push || true
-
       - name: Download MoneyPrinterTurbo
         run: git clone --depth 1 https://github.com/harry0703/MoneyPrinterTurbo.git app
 
@@ -41,19 +32,39 @@ jobs:
 
       - name: Install Python and MoneyPrinterTurbo
         working-directory: app
-        shell: bash
         run: |
-          set -o pipefail
-          uv python install 3.11 2>&1 | tee ../install-python.log
-          uv sync --frozen 2>&1 | tee ../install.log
+          uv python install 3.11
+          uv sync --frozen
 
-      - name: Mark installation complete
+      - name: Install Ollama
         run: |
-          echo "INSTALLED" > ONLINE_STATUS.txt
-          git pull --rebase origin main || true
-          git add ONLINE_STATUS.txt
-          git commit -m "MoneyPrinterTurbo online dependencies installed" || true
-          git push || true
+          curl -fsSL https://ollama.com/install.sh | sh
+          nohup ollama serve > ollama.log 2>&1 &
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat ollama.log
+          exit 1
+
+      - name: Load free local language model
+        run: ollama pull qwen2.5:1.5b
+
+      - name: Configure keyless AI
+        working-directory: app
+        run: |
+          cp config.example.toml config.toml
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("config.toml")
+          s = p.read_text()
+          s = s.replace('llm_provider = "moonshot"', 'llm_provider = "ollama"', 1)
+          s = s.replace('ollama_base_url = ""', 'ollama_base_url = "http://127.0.0.1:11434/v1"', 1)
+          s = s.replace('ollama_model_name = ""', 'ollama_model_name = "qwen2.5:1.5b"', 1)
+          p.write_text(s)
+          PY
 
       - name: Launch MoneyPrinterTurbo
         working-directory: app
@@ -105,10 +116,11 @@ jobs:
       - name: Save live URL
         run: |
           cp public-url.txt PUBLIC_URL.txt
-          echo "ONLINE $PUBLIC_URL" > ONLINE_STATUS.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
-          git add PUBLIC_URL.txt ONLINE_STATUS.txt
-          git commit -m "MoneyPrinterTurbo is online" || true
+          git add PUBLIC_URL.txt
+          git commit -m "Update live MoneyPrinterTurbo URL" || true
           git push || true
 
       - uses: actions/upload-artifact@v4
@@ -116,21 +128,6 @@ jobs:
           name: public-url
           path: public-url.txt
           retention-days: 1
-
-      - name: Save failure details
-        if: failure()
-        run: |
-          {
-            echo "FAILED"
-            [ -f install-python.log ] && tail -n 30 install-python.log
-            [ -f install.log ] && tail -n 80 install.log
-            [ -f app.log ] && tail -n 80 app.log
-            [ -f tunnel.log ] && tail -n 80 tunnel.log
-          } > ONLINE_STATUS.txt
-          git pull --rebase origin main || true
-          git add ONLINE_STATUS.txt
-          git commit -m "MoneyPrinterTurbo online deployment failed" || true
-          git push || true
 
       - name: Keep online
         if: success()
