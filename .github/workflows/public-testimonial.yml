@@ -1,0 +1,87 @@
+name: Public MoneyPrinterTurbo Testimonial
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/public-testimonial.yml'
+      - 'Dockerfile.testimonial'
+      - 'testimonial_prefill.py'
+
+permissions:
+  contents: write
+
+jobs:
+  serve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -f Dockerfile.testimonial -t moneyprinterturbo-testimonial .
+      - name: Run
+        run: docker run -d --name moneyprinterturbo-testimonial -p 8501:8501 moneyprinterturbo-testimonial
+      - name: Health
+        run: |
+          for i in {1..90}; do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs moneyprinterturbo-testimonial
+          exit 1
+      - name: Local prerequisites
+        run: |
+          docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-1.mp4
+          docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-2.mp4
+          docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-3.mp4
+          docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-4.mp4
+          docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-5.mp4
+          docker exec moneyprinterturbo-testimonial espeak-ng --version
+          docker exec moneyprinterturbo-testimonial ffmpeg -version
+      - name: Install tunnel
+        run: |
+          curl -L --fail --retry 3 -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+      - name: Publish
+        run: |
+          ./cloudflared tunnel --url http://127.0.0.1:8501 --no-autoupdate > tunnel.log 2>&1 &
+          for i in {1..60}; do
+            URL=$(grep -o 'https://[-a-z0-9]*\.trycloudflare\.com' tunnel.log | head -n1 || true)
+            if [ -n "$URL" ]; then
+              echo "$URL" | tee testimonial-url.txt
+              echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
+              echo "### $URL" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat tunnel.log
+          exit 1
+      - name: Verify public URL
+        run: |
+          for i in {1..30}; do
+            if curl -LfsS "$PUBLIC_URL/_stcore/health" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testimonial-url
+          path: testimonial-url.txt
+          retention-days: 1
+      - name: Save URL
+        run: |
+          cp testimonial-url.txt TESTIMONIAL_URL.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add TESTIMONIAL_URL.txt
+          git commit -m "Update testimonial test URL" || true
+          git push
+      - name: Keep alive
+        run: sleep 21000
