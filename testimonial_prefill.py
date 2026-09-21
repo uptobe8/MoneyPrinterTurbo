@@ -71,7 +71,7 @@ def local_tts(text, voice_name, voice_rate, voice_file, **kwargs):
     with tempfile.TemporaryDirectory() as tmp:
         wav_file = os.path.join(tmp, "voice.wav")
         subprocess.run(
-            ["espeak-ng", "-v", "es", "-s", "182", "-p", "46", "-a", "165", "-w", wav_file, text],
+            ["espeak", "-v", "es", "-s", "182", "-p", "46", "-a", "165", "-w", wav_file, text],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
