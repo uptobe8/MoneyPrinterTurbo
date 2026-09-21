@@ -15,6 +15,7 @@ RUN mkdir -p /MoneyPrinterTurbo/storage/local_videos && \
     ffmpeg -y -loglevel error -f lavfi -i "color=c=#d58a5f:s=1080x1920:d=7:r=25" -vf "drawbox=x=0:y=0:w=1080:h=770:color=#efb477:t=fill,drawbox=x=0:y=770:w=1080:h=1150:color=#80634d:t=fill,drawbox=x=80:y=680:w=300:h=900:color=#6c5546:t=fill,drawbox=x=700:y=600:w=300:h=980:color=#5e4d43:t=fill,drawbox=x=745:y=790:w=115:h=140:color=#f2cf7c@0.85:t=fill,drawbox=x=420:y=950:w=230:h=560:color=#526347:t=fill,drawbox=x=480:y=850:w=110:h=110:color=#d9b79b:t=fill" -c:v libx264 -pix_fmt yuv420p /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-5.mp4
 
 COPY testimonial_prefill.py /MoneyPrinterTurbo/testimonial_prefill.py
+COPY testimonial_selftest.py /MoneyPrinterTurbo/testimonial_selftest.py
 
 EXPOSE 8501
 
