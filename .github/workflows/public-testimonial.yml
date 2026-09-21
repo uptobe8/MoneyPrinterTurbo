@@ -82,12 +82,15 @@ jobs:
           path: testimonial-url.txt
           retention-days: 1
       - name: Save URL
+        continue-on-error: true
         run: |
-          cp testimonial-url.txt TESTIMONIAL_URL.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
+          cp testimonial-url.txt TESTIMONIAL_URL.txt
           git add TESTIMONIAL_URL.txt
           git commit -m "Update testimonial test URL" || true
-          git push
+          git push || true
       - name: Keep alive
+        if: always()
         run: sleep 21000
