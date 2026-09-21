@@ -1,0 +1,27 @@
+name: Capture PNG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/capture-png.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download screenshot
+        run: |
+          curl -L --fail --retry 3 "https://s3.eu-central-2.wasabisys.com/w.storage.screenshotapi.net/eleven_extreme_meetings_lyrics_trycloudflare_com_6e4834cff93e.png" -o MoneyPrinterTurbo_home_completa.png
+          file MoneyPrinterTurbo_home_completa.png
+      - name: Commit PNG
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add MoneyPrinterTurbo_home_completa.png
+          git commit -m "Add MoneyPrinterTurbo full-page PNG" || true
+          git push
