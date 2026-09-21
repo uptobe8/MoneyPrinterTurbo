@@ -203,11 +203,21 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Verify free image source
+        working-directory: app
+        run: |
+          curl -fsS --max-time 60 http://127.0.0.1:9000/v1/images/generations -H 'Content-Type: application/json' -d '{"model":"wikimedia-free","prompt":"badminton player","n":1,"size":"512x768"}' -o /tmp/image-test.json
+          python - <<'PY'
+          import json
+          d = json.load(open("/tmp/image-test.json"))
+          assert d["data"][0]["b64_json"]
+          PY
+
       - name: End-to-end generation test
         working-directory: app
         run: |
           set -o pipefail
-          uv run python cli.py             --video-subject "persona jugando al badminton"             --video-language es-ES             --paragraph-number 1             --video-source openai_image             --video-aspect 9:16             --video-clip-duration 4             --voice-name es-ES-ElviraNeural-Female             --bgm-type none             --subtitle-enabled             --stop-at video             2>&1 | tee ../e2e.log
+          timeout 300 uv run python cli.py --video-subject "persona jugando al badminton" --video-script "Una persona juega al bádminton con energía y precisión en una pista cubierta." --video-terms "badminton player" --video-language es-ES --video-source openai_image --video-aspect 9:16 --video-clip-duration 4 --voice-name es-ES-ElviraNeural-Female --bgm-type none --subtitle-enabled --stop-at video 2>&1 | tee ../e2e.log
           test -n "$(find storage/tasks -type f -name 'final-*.mp4' -size +10k | head -n1)"
 
       - name: Launch MoneyPrinterTurbo
