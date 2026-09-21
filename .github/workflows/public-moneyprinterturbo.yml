@@ -49,10 +49,141 @@ jobs:
           cat ollama.log
           exit 1
 
-      - name: Load free local language model
+      - name: Load free language model
         run: ollama pull qwen2.5:1.5b
 
-      - name: Configure keyless AI
+      - name: Create free image gateway
+        working-directory: app
+        run: |
+          cat > image_gateway.py <<'PY'
+          import base64
+          import io
+          import json
+          import re
+          import urllib.parse
+          import urllib.request
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from PIL import Image, ImageOps
+
+          UA = "MoneyPrinterTurbo-FreeGateway/1.0"
+
+          def fetch_json(url):
+              req = urllib.request.Request(url, headers={"User-Agent": UA})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.loads(r.read().decode("utf-8"))
+
+          def fetch_bytes(url):
+              req = urllib.request.Request(url, headers={"User-Agent": UA})
+              with urllib.request.urlopen(req, timeout=45) as r:
+                  return r.read()
+
+          def normalize_query(prompt):
+              text = re.sub(r"[^A-Za-z0-9À-ÿ\s-]", " ", prompt or "")
+              words = [w for w in text.split() if len(w) > 2]
+              drop = {
+                  "cinematic","photo","photorealistic","realistic","high","detail",
+                  "portrait","vertical","image","shot","scene","warm","light","style"
+              }
+              words = [w for w in words if w.lower() not in drop]
+              return " ".join(words[:8]) or "people"
+
+          def commons_image(prompt):
+              q = normalize_query(prompt)
+              params = urllib.parse.urlencode({
+                  "action": "query",
+                  "generator": "search",
+                  "gsrsearch": q,
+                  "gsrnamespace": 6,
+                  "gsrlimit": 12,
+                  "prop": "imageinfo",
+                  "iiprop": "url|mime",
+                  "format": "json",
+                  "origin": "*"
+              })
+              data = fetch_json("https://commons.wikimedia.org/w/api.php?" + params)
+              pages = list((data.get("query") or {}).get("pages", {}).values())
+              for page in pages:
+                  info = (page.get("imageinfo") or [{}])[0]
+                  mime = str(info.get("mime") or "")
+                  url = str(info.get("url") or "")
+                  if mime in {"image/jpeg","image/png","image/webp"} and url.startswith("http"):
+                      try:
+                          raw = fetch_bytes(url)
+                          with Image.open(io.BytesIO(raw)) as im:
+                              im.load()
+                              return im.convert("RGB")
+                      except Exception:
+                          pass
+              for fallback in ("people", "city", "nature"):
+                  if fallback == q:
+                      continue
+                  try:
+                      return commons_image(fallback)
+                  except Exception:
+                      pass
+              raise RuntimeError("No usable image found")
+
+          class Handler(BaseHTTPRequestHandler):
+              def log_message(self, fmt, *args):
+                  pass
+
+              def do_GET(self):
+                  if self.path == "/health":
+                      self.send_response(200)
+                      self.end_headers()
+                      self.wfile.write(b"ok")
+                      return
+                  self.send_response(404)
+                  self.end_headers()
+
+              def do_POST(self):
+                  if self.path != "/v1/images/generations":
+                      self.send_response(404)
+                      self.end_headers()
+                      return
+                  try:
+                      length = int(self.headers.get("Content-Length", "0"))
+                      payload = json.loads(self.rfile.read(length) or b"{}")
+                      prompt = payload.get("prompt", "")
+                      size = str(payload.get("size") or "1024x1536")
+                      try:
+                          w, h = [int(x) for x in size.lower().split("x", 1)]
+                      except Exception:
+                          w, h = 1024, 1536
+                      image = commons_image(prompt)
+                      image = ImageOps.fit(image, (w, h), method=Image.Resampling.LANCZOS)
+                      out = io.BytesIO()
+                      image.save(out, format="JPEG", quality=90, optimize=True)
+                      body = json.dumps({
+                          "created": 0,
+                          "data": [{"b64_json": base64.b64encode(out.getvalue()).decode("ascii")}]
+                      }).encode("utf-8")
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/json")
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+                  except Exception as e:
+                      body = json.dumps({"error": {"message": str(e)}}).encode("utf-8")
+                      self.send_response(500)
+                      self.send_header("Content-Type", "application/json")
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+
+          ThreadingHTTPServer(("127.0.0.1", 9000), Handler).serve_forever()
+          PY
+          nohup uv run python image_gateway.py > ../image-gateway.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:9000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat ../image-gateway.log
+          exit 1
+
+      - name: Configure fully keyless generation
         working-directory: app
         run: |
           cp config.example.toml config.toml
@@ -61,10 +192,23 @@ jobs:
           p = Path("config.toml")
           s = p.read_text()
           s = s.replace('llm_provider = "moonshot"', 'llm_provider = "ollama"', 1)
+          s = s.replace('video_source = "pexels"', 'video_source = "openai_image"', 1)
           s = s.replace('ollama_base_url = ""', 'ollama_base_url = "http://127.0.0.1:11434/v1"', 1)
           s = s.replace('ollama_model_name = ""', 'ollama_model_name = "qwen2.5:1.5b"', 1)
+          s = s.replace('openai_image_base_url = ""', 'openai_image_base_url = "http://127.0.0.1:9000/v1"', 1)
+          s = s.replace('openai_image_model = ""', 'openai_image_model = "wikimedia-free"', 1)
+          s = s.replace('match_materials_to_script = false', 'match_materials_to_script = true', 1)
+          s = s.replace('hide_log = false', 'hide_log = false\nlanguage = "es"\nvideo_language = "es-ES"\nparagraph_number = 3\nvideo_concat_mode = "sequential"\nvideo_transition_mode = "FadeIn"\nvideo_aspect_openai_image = "9:16"\nvideo_fit_mode = "cover"\nvideo_clip_duration = 4\nvideo_clip_speed = 1.0\nvideo_count = 1\ntts_server = "azure-tts-v1"\nvoice_name = "es-ES-ElviraNeural-Female"\nvoice_mode = "tts"\nvoice_volume = 1.0\nvoice_rate = 1.0\nbgm_type = "random"\nbgm_volume = 0.15\nsubtitle_enabled = true', 1)
+          s = s.replace('open_task_folder_on_completion = true', 'open_task_folder_on_completion = false', 1)
           p.write_text(s)
           PY
+
+      - name: End-to-end generation test
+        working-directory: app
+        run: |
+          set -o pipefail
+          uv run python cli.py             --video-subject "persona jugando al badminton"             --video-language es-ES             --paragraph-number 1             --video-source openai_image             --video-aspect 9:16             --video-clip-duration 4             --voice-name es-ES-ElviraNeural-Female             --bgm-type none             --subtitle-enabled             --stop-at video             2>&1 | tee ../e2e.log
+          test -n "$(find storage/tasks -type f -name 'final-*.mp4' -size +10k | head -n1)"
 
       - name: Launch MoneyPrinterTurbo
         working-directory: app
@@ -120,7 +264,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
           git add PUBLIC_URL.txt
-          git commit -m "Update live MoneyPrinterTurbo URL" || true
+          git commit -m "Update verified live MoneyPrinterTurbo URL" || true
           git push || true
 
       - uses: actions/upload-artifact@v4
@@ -128,6 +272,23 @@ jobs:
           name: public-url
           path: public-url.txt
           retention-days: 1
+
+      - name: Save failure details
+        if: failure()
+        run: |
+          {
+            echo "FAILED"
+            [ -f image-gateway.log ] && tail -n 80 image-gateway.log
+            [ -f e2e.log ] && tail -n 160 e2e.log
+            [ -f app.log ] && tail -n 120 app.log
+            [ -f tunnel.log ] && tail -n 80 tunnel.log
+          } > ONLINE_STATUS.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
+          git add ONLINE_STATUS.txt
+          git commit -m "Save online deployment failure details" || true
+          git push || true
 
       - name: Keep online
         if: success()
