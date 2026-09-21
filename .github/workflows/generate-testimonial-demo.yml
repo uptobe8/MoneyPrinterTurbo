@@ -1,0 +1,49 @@
+name: Generate Testimonial Demo
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/generate-testimonial-demo.yml'
+      - 'Dockerfile.testimonial'
+      - 'testimonial_generate_demo.py'
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build testimonial image
+        run: docker build -f Dockerfile.testimonial -t moneyprinterturbo-testimonial .
+
+      - name: Generate final testimonial video
+        run: |
+          mkdir -p output
+          docker run --rm -v "$PWD/output:/output" moneyprinterturbo-testimonial python /MoneyPrinterTurbo/testimonial_generate_demo.py
+
+      - name: Verify generated MP4
+        run: |
+          test -s output/testimonial-demo.mp4
+          docker run --rm -v "$PWD/output:/output" moneyprinterturbo-testimonial ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 /output/testimonial-demo.mp4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testimonial-demo
+          path: output/testimonial-demo.mp4
+          retention-days: 7
+
+      - name: Publish demo in repository
+        run: |
+          cp output/testimonial-demo.mp4 testimonial-demo.mp4
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add testimonial-demo.mp4
+          git commit -m "Publish generated testimonial demo" || true
+          git push
