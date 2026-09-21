@@ -1,12 +1,8 @@
 import os
 import runpy
-import subprocess
-import tempfile
-
 import streamlit as st
 
 from app.config import config
-from app.services import voice
 
 SUBJECT = "Testimonio de una administradora de fincas extremeña que recupera una vivienda cerrada con deudas y devuelve tranquilidad a la comunidad."
 
@@ -34,6 +30,7 @@ config.app["video_source"] = "local"
 config.app["llm_provider"] = "pollinations"
 config.app["script_generation_backend"] = "local"
 config.app["match_materials_to_script"] = True
+config.app["subtitle_provider"] = "edge"
 config.ui["language"] = "es"
 config.ui["video_language"] = "es-ES"
 config.ui["paragraph_number"] = 5
@@ -63,39 +60,5 @@ st.session_state.setdefault(
     "local_video_materials",
     [{"provider": "local", "url": path, "duration": 7} for path in MATERIALS],
 )
-
-voice.get_all_azure_voices = lambda: ["es-ES-ElviraNeural-Female"]
-
-def local_tts(text, voice_name, voice_rate, voice_file, **kwargs):
-    os.makedirs(os.path.dirname(voice_file), exist_ok=True)
-    with tempfile.TemporaryDirectory() as tmp:
-        wav_file = os.path.join(tmp, "voice.wav")
-        subprocess.run(
-            ["espeak", "-v", "es", "-s", "182", "-p", "46", "-a", "165", "-w", wav_file, text],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-loglevel",
-                "error",
-                "-i",
-                wav_file,
-                "-af",
-                "apad=pad_dur=35,atrim=0:35",
-                "-c:a",
-                "libmp3lame",
-                "-b:a",
-                "128k",
-                voice_file,
-            ],
-            check=True,
-        )
-    return object()
-
-voice.tts = local_tts
 
 runpy.run_path("/MoneyPrinterTurbo/webui/Main.py", run_name="__main__")
