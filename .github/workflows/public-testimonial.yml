@@ -40,7 +40,7 @@ jobs:
           docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-3.mp4
           docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-4.mp4
           docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-5.mp4
-          docker exec moneyprinterturbo-testimonial espeak-ng --version
+          docker exec moneyprinterturbo-testimonial espeak --version
           docker exec moneyprinterturbo-testimonial ffmpeg -version
       - name: Install tunnel
         run: |
