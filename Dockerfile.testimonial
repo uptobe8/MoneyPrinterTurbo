@@ -3,7 +3,6 @@ FROM ghcr.io/harry0703/moneyprinterturbo:latest
 USER root
 WORKDIR /MoneyPrinterTurbo
 
-RUN apt-get update && apt-get install -y --no-install-recommends espeak && rm -rf /var/lib/apt/lists/*
 
 RUN if [ ! -f config.toml ] && [ -f config.example.toml ]; then cp config.example.toml config.toml; fi
 
