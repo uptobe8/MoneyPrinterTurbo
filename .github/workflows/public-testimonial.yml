@@ -9,6 +9,7 @@ on:
       - '.github/workflows/public-testimonial.yml'
       - 'Dockerfile.testimonial'
       - 'testimonial_prefill.py'
+      - 'testimonial_selftest.py'
 
 permissions:
   contents: write
@@ -42,6 +43,8 @@ jobs:
           docker exec moneyprinterturbo-testimonial test -s /MoneyPrinterTurbo/storage/local_videos/testimonial-scene-5.mp4
           docker exec moneyprinterturbo-testimonial espeak --version
           docker exec moneyprinterturbo-testimonial ffmpeg -version
+      - name: End-to-end generation self-test
+        run: docker exec moneyprinterturbo-testimonial python /MoneyPrinterTurbo/testimonial_selftest.py
       - name: Install tunnel
         run: |
           curl -L --fail --retry 3 -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
