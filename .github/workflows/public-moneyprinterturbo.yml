@@ -22,24 +22,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Download MoneyPrinterTurbo
+        run: git clone --depth 1 https://github.com/harry0703/MoneyPrinterTurbo.git app
+
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
           version: latest
 
-      - name: Install Python and dependencies
+      - name: Install Python and MoneyPrinterTurbo
+        working-directory: app
         run: |
           uv python install 3.11
           uv sync --frozen
 
       - name: Launch MoneyPrinterTurbo
+        working-directory: app
         run: |
-          nohup uv run streamlit run ./webui/Main.py             --server.address=0.0.0.0             --server.port=8501             --server.enableCORS=true             --browser.gatherUsageStats=false             --client.toolbarMode=minimal             --logger.hideWelcomeMessage=true             --server.showEmailPrompt=false             > app.log 2>&1 &
-          echo $! > app.pid
+          nohup uv run streamlit run ./webui/Main.py             --server.address=0.0.0.0             --server.port=8501             --server.enableCORS=true             --browser.gatherUsageStats=false             --client.toolbarMode=minimal             --logger.hideWelcomeMessage=true             --server.showEmailPrompt=false             > ../app.log 2>&1 &
+          echo $! > ../app.pid
 
       - name: Verify MoneyPrinterTurbo
         run: |
-          for i in {1..90}; do
+          for i in {1..120}; do
             if curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null; then
               exit 0
             fi
