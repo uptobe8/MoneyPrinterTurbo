@@ -11,6 +11,10 @@ on:
       - 'testimonial_prefill.py'
       - 'testimonial_selftest.py'
 
+concurrency:
+  group: public-testimonial
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
