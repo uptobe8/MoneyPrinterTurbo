@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MoneyPrinterTurbo</title>
+<style>html,body{height:100%;margin:0;font-family:Arial,sans-serif;background:#0b0b0b;color:#fff}body{display:grid;place-items:center}.box{text-align:center}.dot{width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;margin:0 auto 14px;animation:s .8s linear infinite}@keyframes s{to{transform:rotate(360deg)}}</style>
+</head>
+<body>
+<div class="box"><div class="dot"></div><div>Abriendo MoneyPrinterTurbo…</div></div>
+<script>
+(async()=>{try{const r=await fetch('https://raw.githubusercontent.com/uptobe8/MoneyPrinterTurbo/main/PUBLIC_URL.txt?t='+Date.now(),{cache:'no-store'});const u=(await r.text()).trim();if(/^https:\/\/[-a-z0-9]+\.trycloudflare\.com$/.test(u)){location.replace(u);return}}catch(e){}document.querySelector('.box').textContent='Servicio reiniciándose. Recarga en unos segundos.'})()
+</script>
+</body>
+</html>
