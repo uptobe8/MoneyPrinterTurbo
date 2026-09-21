@@ -38,14 +38,14 @@ config.ui["video_concat_mode"] = "sequential"
 config.ui["video_transition_mode"] = "FadeIn"
 config.ui["video_aspect_local"] = "9:16"
 config.ui["video_fit_mode"] = "cover"
-config.ui["video_clip_duration"] = 7
+config.ui["video_clip_duration"] = 8
 config.ui["video_clip_speed"] = 1.0
 config.ui["video_count"] = 1
 config.ui["voice_mode"] = "tts"
 config.ui["tts_server"] = "azure-tts-v1"
 config.ui["voice_name"] = "es-ES-ElviraNeural-Female"
 config.ui["voice_volume"] = 1.0
-config.ui["voice_rate"] = 1.0
+config.ui["voice_rate"] = 1.1
 config.ui["bgm_type"] = ""
 config.ui["bgm_volume"] = 0.0
 config.ui["subtitle_enabled"] = False
@@ -58,7 +58,7 @@ st.session_state.setdefault("video_terms", TERMS)
 st.session_state.setdefault("match_materials_to_script", True)
 st.session_state.setdefault(
     "local_video_materials",
-    [{"provider": "local", "url": path, "duration": 7} for path in MATERIALS],
+    [{"provider": "local", "url": path, "duration": 12} for path in MATERIALS],
 )
 
 runpy.run_path("/MoneyPrinterTurbo/webui/Main.py", run_name="__main__")
