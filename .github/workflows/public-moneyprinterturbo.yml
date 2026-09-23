@@ -78,6 +78,36 @@ jobs:
           p.write_text(s, encoding='utf-8')
           PY
 
+      - name: Generate and verify real test video
+        working-directory: app
+        run: |
+          TASK_ID=$(python -c 'import uuid; print(uuid.uuid4())')
+          uv run python cli.py \
+            --video-subject "persona jugando al bádminton en una pista deportiva" \
+            --video-language es-ES \
+            --paragraph-number 1 \
+            --video-source pexels \
+            --video-aspect 9:16 \
+            --voice-name es-ES-ElviraNeural-Female \
+            --task-id "$TASK_ID"
+          VIDEO=$(find "storage/tasks/$TASK_ID" -maxdepth 1 -type f -name 'final-*.mp4' -size +10000c | head -n1)
+          test -n "$VIDEO"
+          cp "$VIDEO" ../TEST_VIDEO.mp4
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('../TEST_VIDEO.mp4')
+          data = p.read_bytes()
+          if len(data) <= 10000 or b'ftyp' not in data[:32]:
+              raise SystemExit('Invalid generated MP4')
+          print(f'Verified MP4: {len(data)} bytes')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moneyprinterturbo-tested-video
+          path: TEST_VIDEO.mp4
+          retention-days: 1
+
       - name: Launch MoneyPrinterTurbo
         working-directory: app
         run: |
