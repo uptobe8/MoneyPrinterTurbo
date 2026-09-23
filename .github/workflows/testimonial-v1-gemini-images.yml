@@ -1,0 +1,256 @@
+name: MoneyPrinterTurbo Testimonial Gemini Images
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/testimonial-v1-gemini-images.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download MoneyPrinterTurbo
+        run: git clone --depth 1 https://github.com/harry0703/MoneyPrinterTurbo.git app
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install MoneyPrinterTurbo
+        working-directory: app
+        run: |
+          uv python install 3.11
+          uv sync --frozen
+
+      - name: Create Gemini image compatibility gateway
+        run: |
+          cat > gemini_image_gateway.py <<'PY'
+          import base64
+          import io
+          import json
+          import os
+          import threading
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from google import genai
+          from google.genai import types
+          from PIL import Image
+
+          client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
+          lock = threading.Lock()
+          state = {'count': 0, 'anchor': None}
+
+          GLOBAL = '''Create one hyperrealistic cinematic vertical 9:16 frame for a real Spanish property-management testimonial. Warm natural daylight, realistic skin texture, restrained emotion, subtle handheld-documentary feeling, shallow depth of field, no advertising gloss, no text, no logos, no private data. The location should feel like an inland town in Extremadura, Spain, without rural clichés. The protagonist is a believable Spanish woman around 50 years old, medium brown shoulder-length hair, warm brown eyes, beige linen blazer, off-white blouse and dark trousers, professional but simple. When the protagonist appears after the first scene, preserve exactly the same facial identity, age, hairstyle and wardrobe as the reference image.'''
+
+          def extract_image(response):
+              candidates = getattr(response, 'candidates', None) or []
+              for cand in candidates:
+                  content = getattr(cand, 'content', None)
+                  for part in getattr(content, 'parts', None) or []:
+                      inline = getattr(part, 'inline_data', None)
+                      data = getattr(inline, 'data', None) if inline else None
+                      if data:
+                          return bytes(data)
+              raise RuntimeError('Gemini returned no image')
+
+          def make_image(term):
+              with lock:
+                  state['count'] += 1
+                  idx = state['count']
+                  anchor = state['anchor']
+
+              if idx == 1:
+                  prompt = GLOBAL + '\nSCENE 1. ' + term + '\nThe woman is walking naturally through the entrance hall and glances toward camera with visible relief. Medium shot.'
+                  parts = [types.Part.from_text(text=prompt)]
+              elif idx == 2:
+                  prompt = GLOBAL + '\nSCENE 2. ' + term + '\nB-roll only: old apartment mailbox, tasteful building details, keys and administrative documents on a table. No readable personal information. No person is required.'
+                  parts = [types.Part.from_text(text=prompt)]
+              else:
+                  if not anchor:
+                      raise RuntimeError('Missing protagonist reference image')
+                  if idx == 3:
+                      scene = 'SCENE 3. Same woman seated in a modest professional office, speaking toward camera with a small authentic smile, folders and laptop on desk, natural hand gesture.'
+                  elif idx == 4:
+                      scene = 'SCENE 4. Same woman in the building entrance watching a young Spanish couple arrive with two happy children; one child carries a small toy or box. The woman smiles sincerely. Family-friendly, natural, not posed.'
+                  else:
+                      scene = 'SCENE 5. Close-up of the exact same woman, visibly moved and proud but emotionally restrained, looking toward camera with a gentle sincere smile.'
+                  prompt = GLOBAL + '\nUse the attached image strictly as the identity reference for the protagonist. ' + scene + '\n' + term
+                  parts = [
+                      types.Part.from_bytes(data=anchor, mime_type='image/png'),
+                      types.Part.from_text(text=prompt),
+                  ]
+
+              response = client.models.generate_content(
+                  model='gemini-2.5-flash-image',
+                  contents=[types.Content(role='user', parts=parts)],
+                  config=types.GenerateContentConfig(
+                      response_modalities=['IMAGE'],
+                      image_config=types.ImageConfig(aspect_ratio='9:16'),
+                  ),
+              )
+              data = extract_image(response)
+              image = Image.open(io.BytesIO(data)).convert('RGB')
+              out = io.BytesIO()
+              image.save(out, format='PNG')
+              png = out.getvalue()
+              if idx == 1:
+                  with lock:
+                      state['anchor'] = png
+              return png
+
+          class Handler(BaseHTTPRequestHandler):
+              def log_message(self, fmt, *args):
+                  return
+              def _json(self, code, obj):
+                  body=json.dumps(obj).encode('utf-8')
+                  self.send_response(code)
+                  self.send_header('Content-Type','application/json')
+                  self.send_header('Content-Length',str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+              def do_GET(self):
+                  if self.path == '/health':
+                      self._json(200, {'ok': True})
+                  else:
+                      self._json(404, {'error': {'message': 'not found'}})
+              def do_POST(self):
+                  if not self.path.endswith('/images/generations'):
+                      return self._json(404, {'error': {'message': 'not found'}})
+                  try:
+                      length=int(self.headers.get('Content-Length','0'))
+                      payload=json.loads(self.rfile.read(length) or b'{}')
+                      prompt=str(payload.get('prompt') or '').strip()
+                      if not prompt:
+                          raise ValueError('missing prompt')
+                      png=make_image(prompt)
+                      self._json(200, {'data': [{'b64_json': base64.b64encode(png).decode('ascii')}]})
+                  except Exception as exc:
+                      self._json(500, {'error': {'message': f'{type(exc).__name__}: {exc}'}})
+
+          ThreadingHTTPServer(('127.0.0.1', 8099), Handler).serve_forever()
+          PY
+
+      - name: Configure MoneyPrinterTurbo
+        working-directory: app
+        run: |
+          cp config.example.toml config.toml
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          g=os.environ['GEMINI_API_KEY'].strip()
+          if not g:
+              raise SystemExit('Missing GEMINI_API_KEY')
+          f=Path('config.toml')
+          s=f.read_text(encoding='utf-8')
+          s=s.replace('gemini_api_key = ""', f'gemini_api_key = {json.dumps(g)}', 1)
+          s=s.replace('gemini_model_name = ""', 'gemini_model_name = "gemini-3.5-flash-lite"', 1)
+          s=s.replace('openai_image_base_url = ""', 'openai_image_base_url = "http://127.0.0.1:8099/v1"', 1)
+          s=s.replace('openai_image_model = ""', 'openai_image_model = "gemini-2.5-flash-image"', 1)
+          s=s.replace('openai_image_size = ""', 'openai_image_size = "1024x1536"', 1)
+          if 'llm_provider = "moonshot"' in s:
+              s=s.replace('llm_provider = "moonshot"','llm_provider = "gemini"',1)
+          f.write_text(s,encoding='utf-8')
+          PY
+
+      - name: Launch Gemini image gateway
+        working-directory: app
+        run: |
+          nohup uv run python ../gemini_image_gateway.py > ../gemini-image-gateway.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8099/health >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat ../gemini-image-gateway.log
+          exit 1
+
+      - name: Generate testimonial in MoneyPrinterTurbo
+        working-directory: app
+        shell: bash
+        run: |
+          SCRIPT=$(cat <<'EOF'
+          Este piso llevaba muchísimo tiempo abandonado… y tenía una deuda que parecía imposible de resolver.
+
+          La comunidad ya no sabía qué hacer. Cada mes que pasaba, el problema iba creciendo.
+
+          Pero nos pusimos manos a la obra y, en solo seis meses, conseguimos solucionarlo todo. Hoy ese piso ya no tiene ninguna deuda.
+
+          Y ahora viven aquí una pareja joven con sus dos niños. Da gusto ver cómo un problema tan grande se ha convertido en un nuevo comienzo.
+
+          Para mí, eso es lo más bonito de este trabajo.
+          EOF
+          )
+
+          TERMS='administradora de fincas caminando por el portal de una comunidad con expresión de alivio,buzón antiguo del piso y documentación administrativa sin datos personales sobre una mesa,administradora de fincas sentada en su despacho hablando a cámara con emoción contenida,pareja joven entrando al edificio con sus dos hijos mientras la administradora los observa,primer plano emocional de la administradora orgullosa y satisfecha'
+
+          uv run python cli.py \
+            --video-script "$SCRIPT" \
+            --video-terms "$TERMS" \
+            --video-language es-ES \
+            --video-source openai_image \
+            --video-aspect 9:16 \
+            --video-fit-mode cover \
+            --video-concat-mode sequential \
+            --video-transition-mode fade-in \
+            --video-clip-duration 7 \
+            --match-materials-to-script \
+            --voice-name gemini:Sulafat-Warm \
+            --voice-rate 1.05 \
+            --voice-volume 1.0 \
+            --bgm-type random \
+            --bgm-volume 0.08 \
+            --subtitle-enabled \
+            --subtitle-display-mode sentence \
+            --subtitle-position bottom \
+            --video-count 1 \
+            | tee ../testimonial-result.json
+
+      - name: Verify and capture frames
+        shell: bash
+        run: |
+          VIDEO=$(find app/storage/tasks -type f -name 'final-1.mp4' | head -n1)
+          test -n "$VIDEO"
+          test -s "$VIDEO"
+          cp "$VIDEO" testimonial-v1-gemini.mp4
+          mkdir -p testimonial-frames
+          cd app
+          uv run python - <<'PY' | tee ../testimonial-info.txt
+          from moviepy import VideoFileClip
+          from pathlib import Path
+          p=Path('../testimonial-v1-gemini.mp4')
+          clip=VideoFileClip(str(p))
+          duration=float(clip.duration)
+          width,height=clip.size
+          size=p.stat().st_size
+          print(f'duration={duration:.3f}')
+          print(f'size={size}')
+          print(f'width={width}')
+          print(f'height={height}')
+          assert duration > 25
+          assert width == 1080 and height == 1920
+          points=[2,8,15,22,max(0,duration-2)]
+          for i,t in enumerate(points,1):
+              if t < duration:
+                  clip.save_frame(f'../testimonial-frames/frame-{i:02d}.jpg',t=t)
+          clip.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testimonial-v1-gemini
+          path: |
+            testimonial-v1-gemini.mp4
+            testimonial-info.txt
+            testimonial-result.json
+            testimonial-frames/
+            gemini-image-gateway.log
+          retention-days: 1
