@@ -101,10 +101,28 @@ jobs:
           VIDEO=$(find app/storage/tasks -type f -name 'final-1.mp4' | head -n1)
           test -n "$VIDEO"
           test -s "$VIDEO"
-          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 "$VIDEO" | tee testimonial-ffprobe.txt
           cp "$VIDEO" testimonial-v1-moneyprinter.mp4
           mkdir -p testimonial-frames
-          ffmpeg -y -i testimonial-v1-moneyprinter.mp4 -vf "fps=1/7,scale=360:-2" -frames:v 6 testimonial-frames/frame-%02d.jpg >/dev/null 2>&1
+          cd app
+          uv run python - <<'PY' | tee ../testimonial-ffprobe.txt
+          from moviepy import VideoFileClip
+          from pathlib import Path
+          p=Path('../testimonial-v1-moneyprinter.mp4')
+          clip=VideoFileClip(str(p))
+          duration=float(clip.duration)
+          width,height=clip.size
+          size=p.stat().st_size
+          print(f'duration={duration:.3f}')
+          print(f'size={size}')
+          print(f'width={width}')
+          print(f'height={height}')
+          assert duration > 25
+          assert width == 1080 and height == 1920
+          for i,t in enumerate([2,8,15,22,29], start=1):
+              if t < duration:
+                  clip.save_frame(f'../testimonial-frames/frame-{i:02d}.jpg', t=t)
+          clip.close()
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
