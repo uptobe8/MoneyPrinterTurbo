@@ -19,6 +19,9 @@ jobs:
   online:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -42,12 +45,21 @@ jobs:
         run: |
           cp config.example.toml config.toml
           python - <<'PY'
+          import json
+          import os
           from pathlib import Path
+
+          gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
+          pexels_key = os.environ.get('PEXELS_API_KEY', '').strip()
+          if not gemini_key or not pexels_key:
+              raise SystemExit('Missing required repository secrets')
 
           p = Path('config.toml')
           s = p.read_text(encoding='utf-8')
 
           s = s.replace('video_source = "pexels"', 'video_source = "pexels"', 1)
+          s = s.replace('pexels_api_keys = []', f'pexels_api_keys = [{json.dumps(pexels_key)}]', 1)
+          s = s.replace('gemini_api_key = ""', f'gemini_api_key = {json.dumps(gemini_key)}', 1)
           s = s.replace('gemini_model_name = ""', 'gemini_model_name = "gemini-flash-latest"', 1)
 
           if 'llm_provider = "moonshot"' in s:
