@@ -101,7 +101,7 @@ jobs:
 
       - name: Generate testimonial assets with WaveSpeed
         working-directory: app
-        run: uv run python ../tools/wavespeed_testimonial_v1.py
+        run: uv run python ../tools/wavespeed_testimonial_v2.py
 
       - name: Build final video inside MoneyPrinterTurbo
         working-directory: app
