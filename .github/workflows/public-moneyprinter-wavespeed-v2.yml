@@ -93,7 +93,15 @@ jobs:
 
       - name: Generate testimonial assets
         working-directory: app
-        run: uv run python ../tools/wavespeed_testimonial_v3.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('../tools/wavespeed_testimonial_v3.py').read_text(encoding='utf-8')
+          src=src.replace('"wavespeed-ai/wan-2.2/speech-to-video"','"wavespeed-ai/infinitetalk-fast"')
+          src=src.replace('            "resolution": "480p",\n','')
+          Path('../tools/wavespeed_testimonial_runtime.py').write_text(src,encoding='utf-8')
+          PY
+          uv run python ../tools/wavespeed_testimonial_runtime.py
 
       - name: Build final video with MoneyPrinterTurbo
         working-directory: app
