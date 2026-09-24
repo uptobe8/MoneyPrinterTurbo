@@ -1,4 +1,4 @@
-# retry-4
+# retry-5
 name: MoneyPrinterTurbo WaveSpeed Testimonial
 
 on:
@@ -148,6 +148,18 @@ jobs:
             --no-subtitle-enabled \
             --video-count 1 \
             | tee ../testimonial-result.json
+          VIDEO=$(find "storage/tasks/$TASK_ID" -maxdepth 1 -type f -name 'final-*.mp4' -size +10000c | head -n1)
+          test -n "$VIDEO"
+          cp "$VIDEO" ../TESTIMONIAL_V1_RAW.mp4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testimonial-v1-raw-safety
+          path: |
+            TESTIMONIAL_V1_RAW.mp4
+            testimonial-result.json
+            testimonial-task-id.txt
+          retention-days: 1
 
       - name: Add final message and verify
         working-directory: app
@@ -155,10 +167,9 @@ jobs:
           TASK_ID=$(cat ../testimonial-task-id.txt)
           VIDEO=$(find "storage/tasks/$TASK_ID" -maxdepth 1 -type f -name 'final-*.mp4' -size +10000c | head -n1)
           test -n "$VIDEO"
-          FFMPEG=$(uv run python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')
           FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
           OUT="storage/tasks/$TASK_ID/final-v1-overlay.mp4"
-          "$FFMPEG" -hide_banner -loglevel error -y -i "$VIDEO" \
+          /usr/bin/ffmpeg -hide_banner -loglevel error -y -i "$VIDEO" \
             -vf "drawbox=x=35:y=h-430:w=w-70:h=300:color=black@0.42:t=fill:enable='gte(t,31)',drawtext=fontfile=$FONT:text='De una deuda sin salida a un nuevo hogar.':fontcolor=white:fontsize=54:x=65:y=h-380:enable='gte(t,31)',drawtext=fontfile=$FONT:text='Caso resuelto en 6 meses.':fontcolor=white:fontsize=48:x=65:y=h-295:enable='gte(t,31)'" \
             -c:v libx264 -crf 18 -preset medium -c:a copy "$OUT"
           mv "$OUT" "$VIDEO"
