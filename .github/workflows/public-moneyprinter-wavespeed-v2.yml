@@ -1,0 +1,146 @@
+name: MoneyPrinterTurbo WaveSpeed Testimonial V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/public-moneyprinter-wavespeed-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create one-time key exchange
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/ws-private.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/ws-private.pem -pubout -out wavespeed-public.pem >/dev/null 2>&1
+          echo "KEY_PATH=.github/wavespeed-key-${GITHUB_RUN_ID}.b64" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wavespeed-key-exchange-v2
+          path: wavespeed-public.pem
+          retention-days: 1
+
+      - name: Wait for encrypted key
+        run: |
+          FOUND=0
+          for i in {1..180}; do
+            git fetch origin main >/dev/null 2>&1 || true
+            if git show "origin/main:${KEY_PATH}" > /tmp/ws-key.b64 2>/dev/null; then
+              FOUND=1
+              break
+            fi
+            sleep 5
+          done
+          test "$FOUND" = "1"
+          base64 -d /tmp/ws-key.b64 > /tmp/ws-key.enc
+          openssl pkeyutl -decrypt -inkey /tmp/ws-private.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in /tmp/ws-key.enc -out /tmp/ws-key.txt
+          WS_KEY=$(cat /tmp/ws-key.txt)
+          test -n "$WS_KEY"
+          echo "::add-mask::$WS_KEY"
+          echo "WAVESPEED_API_KEY=$WS_KEY" >> "$GITHUB_ENV"
+          rm -f /tmp/ws-key.enc /tmp/ws-key.txt
+
+      - name: Download MoneyPrinterTurbo
+        run: git clone --depth 1 https://github.com/harry0703/MoneyPrinterTurbo.git app
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y ffmpeg >/dev/null
+          cd app
+          uv python install 3.11
+          uv sync --frozen
+
+      - name: Configure MoneyPrinterTurbo
+        working-directory: app
+        run: |
+          cp config.example.toml config.toml
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path('config.toml')
+          s=p.read_text(encoding='utf-8')
+          pexels=os.environ['PEXELS_API_KEY'].strip()
+          wavespeed=os.environ['WAVESPEED_API_KEY'].strip()
+          gemini=os.environ.get('GEMINI_API_KEY','').strip()
+          if not pexels or not wavespeed:
+              raise SystemExit('Missing provider key')
+          s=s.replace('pexels_api_keys = []',f'pexels_api_keys = [{json.dumps(pexels)}]',1)
+          s=s.replace('wavespeed_api_keys = []',f'wavespeed_api_keys = [{json.dumps(wavespeed)}]',1)
+          s=s.replace('video_source = "pexels"','video_source = "wavespeed"',1)
+          if gemini:
+              s=s.replace('gemini_api_key = ""',f'gemini_api_key = {json.dumps(gemini)}',1)
+              s=s.replace('gemini_model_name = ""','gemini_model_name = "gemini-3.5-flash-lite"',1)
+              s=s.replace('llm_provider = "moonshot"','llm_provider = "gemini"',1)
+          p.write_text(s,encoding='utf-8')
+          PY
+
+      - name: Generate testimonial assets
+        working-directory: app
+        run: uv run python ../tools/wavespeed_testimonial_v2.py
+
+      - name: Build final video with MoneyPrinterTurbo
+        working-directory: app
+        shell: bash
+        run: |
+          TASK_ID=$(python -c 'import uuid; print(uuid.uuid4())')
+          echo "$TASK_ID" > ../testimonial-task-id.txt
+          SCRIPT=$(python - <<'PY'
+          import json
+          print(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['script'])
+          PY
+          )
+          MATERIALS=$(python - <<'PY'
+          import json
+          print(','.join(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['clips']))
+          PY
+          )
+          AUDIO=$(python - <<'PY'
+          import json
+          print(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['audio'])
+          PY
+          )
+          uv run python cli.py --task-id "$TASK_ID" --video-subject "Testimonio administradora de fincas - caso resuelto en 6 meses" --video-script "$SCRIPT" --video-source local --video-materials "$MATERIALS" --custom-audio-file "$AUDIO" --video-language es-ES --video-aspect 9:16 --video-fit-mode cover --video-concat-mode sequential --video-transition-mode fade-in --video-clip-duration 9 --bgm-type random --bgm-volume 0.08 --no-subtitle-enabled --video-count 1 | tee ../testimonial-result.json
+          VIDEO=$(find "storage/tasks/$TASK_ID" -maxdepth 1 -type f -name 'final-*.mp4' -size +10000c | head -n1)
+          test -n "$VIDEO"
+          cp "$VIDEO" ../TESTIMONIAL_V1_FINAL.mp4
+
+      - name: Verify final MP4
+        working-directory: app
+        run: |
+          uv run python - <<'PY'
+          from moviepy import VideoFileClip
+          from pathlib import Path
+          p=Path('../TESTIMONIAL_V1_FINAL.mp4')
+          clip=VideoFileClip(str(p))
+          d=float(clip.duration); size=tuple(clip.size); b=p.stat().st_size
+          print('duration',d,'size',size,'bytes',b)
+          assert 33 <= d <= 37
+          assert size == (1080,1920)
+          clip.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testimonial-v1-real-wavespeed-v2
+          path: |
+            TESTIMONIAL_V1_FINAL.mp4
+            testimonial-result.json
+            testimonial-task-id.txt
+          retention-days: 1
