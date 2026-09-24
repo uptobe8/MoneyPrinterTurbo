@@ -1,0 +1,252 @@
+name: MoneyPrinterTurbo WaveSpeed Testimonial
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/public-moneyprinter-wavespeed-v1.yml'
+
+concurrency:
+  group: moneyprinter-wavespeed-testimonial
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  online:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create secure one-time key exchange
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/wavespeed-private.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/wavespeed-private.pem -pubout -out wavespeed-public.pem >/dev/null 2>&1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wavespeed-key-exchange
+          path: wavespeed-public.pem
+          retention-days: 1
+
+      - name: Wait for encrypted WaveSpeed key
+        run: |
+          FOUND=0
+          for i in {1..180}; do
+            git fetch origin main >/dev/null 2>&1 || true
+            if git show origin/main:.github/wavespeed-key.b64 > /tmp/wavespeed-key.b64 2>/dev/null; then
+              FOUND=1
+              break
+            fi
+            sleep 5
+          done
+          test "$FOUND" = "1"
+          base64 -d /tmp/wavespeed-key.b64 > /tmp/wavespeed-key.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/wavespeed-private.pem \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -in /tmp/wavespeed-key.enc \
+            -out /tmp/wavespeed-key.txt
+          WS_KEY=$(cat /tmp/wavespeed-key.txt)
+          test -n "$WS_KEY"
+          echo "::add-mask::$WS_KEY"
+          echo "WAVESPEED_API_KEY=$WS_KEY" >> "$GITHUB_ENV"
+          rm -f /tmp/wavespeed-key.enc /tmp/wavespeed-key.txt
+
+      - name: Download MoneyPrinterTurbo
+        run: git clone --depth 1 https://github.com/harry0703/MoneyPrinterTurbo.git app
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: latest
+
+      - name: Install MoneyPrinterTurbo
+        working-directory: app
+        run: |
+          uv python install 3.11
+          uv sync --frozen
+
+      - name: Configure MoneyPrinterTurbo
+        working-directory: app
+        run: |
+          cp config.example.toml config.toml
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path('config.toml')
+          s=p.read_text(encoding='utf-8')
+          pexels=os.environ['PEXELS_API_KEY'].strip()
+          wavespeed=os.environ['WAVESPEED_API_KEY'].strip()
+          gemini=os.environ.get('GEMINI_API_KEY','').strip()
+          if not pexels or not wavespeed:
+              raise SystemExit('Missing required provider key')
+          s=s.replace('pexels_api_keys = []',f'pexels_api_keys = [{json.dumps(pexels)}]',1)
+          s=s.replace('wavespeed_api_keys = []',f'wavespeed_api_keys = [{json.dumps(wavespeed)}]',1)
+          s=s.replace('video_source = "pexels"','video_source = "wavespeed"',1)
+          if gemini:
+              s=s.replace('gemini_api_key = ""',f'gemini_api_key = {json.dumps(gemini)}',1)
+              s=s.replace('gemini_model_name = ""','gemini_model_name = "gemini-3.5-flash-lite"',1)
+              s=s.replace('llm_provider = "moonshot"','llm_provider = "gemini"',1)
+          p.write_text(s,encoding='utf-8')
+          PY
+
+      - name: Generate testimonial assets with WaveSpeed
+        working-directory: app
+        run: uv run python ../tools/wavespeed_testimonial_v1.py
+
+      - name: Build final video inside MoneyPrinterTurbo
+        working-directory: app
+        shell: bash
+        run: |
+          TASK_ID=$(python -c 'import uuid; print(uuid.uuid4())')
+          echo "$TASK_ID" > ../testimonial-task-id.txt
+          SCRIPT=$(python - <<'PY'
+          import json
+          print(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['script'])
+          PY
+          )
+          MATERIALS=$(python - <<'PY'
+          import json
+          print(','.join(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['clips']))
+          PY
+          )
+          AUDIO=$(python - <<'PY'
+          import json
+          print(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['audio'])
+          PY
+          )
+          uv run python cli.py \
+            --task-id "$TASK_ID" \
+            --video-subject "Testimonio administradora de fincas - caso resuelto en 6 meses" \
+            --video-script "$SCRIPT" \
+            --video-source local \
+            --video-materials "$MATERIALS" \
+            --custom-audio-file "$AUDIO" \
+            --video-language es-ES \
+            --video-aspect 9:16 \
+            --video-fit-mode cover \
+            --video-concat-mode sequential \
+            --video-transition-mode fade-in \
+            --video-clip-duration 9 \
+            --bgm-type random \
+            --bgm-volume 0.08 \
+            --no-subtitle-enabled \
+            --video-count 1 \
+            | tee ../testimonial-result.json
+
+      - name: Add final message and verify
+        working-directory: app
+        run: |
+          TASK_ID=$(cat ../testimonial-task-id.txt)
+          VIDEO=$(find "storage/tasks/$TASK_ID" -maxdepth 1 -type f -name 'final-*.mp4' -size +10000c | head -n1)
+          test -n "$VIDEO"
+          FFMPEG=$(uv run python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')
+          FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+          OUT="storage/tasks/$TASK_ID/final-v1-overlay.mp4"
+          "$FFMPEG" -hide_banner -loglevel error -y -i "$VIDEO" \
+            -vf "drawbox=x=35:y=h-430:w=w-70:h=300:color=black@0.42:t=fill:enable='gte(t,31)',drawtext=fontfile=$FONT:text='De una deuda sin salida a un nuevo hogar.':fontcolor=white:fontsize=54:x=65:y=h-380:enable='gte(t,31)',drawtext=fontfile=$FONT:text='Caso resuelto en 6 meses.':fontcolor=white:fontsize=48:x=65:y=h-295:enable='gte(t,31)'" \
+            -c:v libx264 -crf 18 -preset medium -c:a copy "$OUT"
+          mv "$OUT" "$VIDEO"
+          cp "$VIDEO" ../TESTIMONIAL_V1_FINAL.mp4
+          mkdir -p ../testimonial-v1-frames
+          uv run python - <<'PY'
+          from moviepy import VideoFileClip
+          from pathlib import Path
+          p=Path('../TESTIMONIAL_V1_FINAL.mp4')
+          clip=VideoFileClip(str(p))
+          print('duration',clip.duration,'size',clip.size,'bytes',p.stat().st_size)
+          assert 34.0 <= clip.duration <= 36.5
+          assert tuple(clip.size)==(1080,1920)
+          for i,t in enumerate([3,10,19,27,33],1):
+              clip.save_frame(f'../testimonial-v1-frames/frame-{i:02d}.jpg',t=t)
+          clip.close()
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testimonial-v1-real-wavespeed
+          path: |
+            TESTIMONIAL_V1_FINAL.mp4
+            testimonial-result.json
+            testimonial-task-id.txt
+            testimonial-v1-frames/
+          retention-days: 1
+
+      - name: Launch MoneyPrinterTurbo
+        working-directory: app
+        run: |
+          nohup uv run streamlit run ./webui/Main.py \
+            --server.address=0.0.0.0 \
+            --server.port=8501 \
+            --server.enableCORS=true \
+            --browser.gatherUsageStats=false \
+            --client.toolbarMode=minimal \
+            --logger.hideWelcomeMessage=true \
+            --server.showEmailPrompt=false \
+            > ../app.log 2>&1 &
+          echo $! > ../app.pid
+
+      - name: Verify app
+        run: |
+          for i in {1..120}; do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat app.log
+          exit 1
+
+      - name: Install Cloudflare tunnel
+        run: |
+          curl -L --fail --retry 3 -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+
+      - name: Publish app online
+        run: |
+          ./cloudflared tunnel --url http://127.0.0.1:8501 --no-autoupdate > tunnel.log 2>&1 &
+          for i in {1..90}; do
+            URL=$(grep -o 'https://[-a-z0-9]*\.trycloudflare\.com' tunnel.log | head -n1 || true)
+            if [ -n "$URL" ]; then
+              echo "$URL" | tee public-url.txt
+              echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat tunnel.log
+          exit 1
+
+      - name: Verify public app
+        run: |
+          for i in {1..45}; do
+            if curl -LfsS "$PUBLIC_URL/_stcore/health" >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Save live URL
+        run: |
+          cp public-url.txt PUBLIC_URL.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
+          git add PUBLIC_URL.txt
+          git commit -m "Update WaveSpeed testimonial URL" || true
+          git push || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moneyprinter-wavespeed-url
+          path: public-url.txt
+          retention-days: 1
+
+      - name: Keep app online
+        run: sleep 21000
