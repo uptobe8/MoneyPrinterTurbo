@@ -93,7 +93,7 @@ jobs:
 
       - name: Generate testimonial assets
         working-directory: app
-        run: uv run python ../tools/wavespeed_testimonial_v2.py
+        run: uv run python ../tools/wavespeed_testimonial_v3.py
 
       - name: Build final video with MoneyPrinterTurbo
         working-directory: app
@@ -103,17 +103,17 @@ jobs:
           echo "$TASK_ID" > ../testimonial-task-id.txt
           SCRIPT=$(python - <<'PY'
           import json
-          print(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['script'])
+          print(json.load(open('storage/testimonial_v1_assets_v3/manifest.json',encoding='utf-8'))['script'])
           PY
           )
           MATERIALS=$(python - <<'PY'
           import json
-          print(','.join(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['clips']))
+          print(','.join(json.load(open('storage/testimonial_v1_assets_v3/manifest.json',encoding='utf-8'))['clips']))
           PY
           )
           AUDIO=$(python - <<'PY'
           import json
-          print(json.load(open('storage/testimonial_v1_assets/manifest.json',encoding='utf-8'))['audio'])
+          print(json.load(open('storage/testimonial_v1_assets_v3/manifest.json',encoding='utf-8'))['audio'])
           PY
           )
           uv run python cli.py --task-id "$TASK_ID" --video-subject "Testimonio administradora de fincas - caso resuelto en 6 meses" --video-script "$SCRIPT" --video-source local --video-materials "$MATERIALS" --custom-audio-file "$AUDIO" --video-language es-ES --video-aspect 9:16 --video-fit-mode cover --video-concat-mode sequential --video-transition-mode fade-in --video-clip-duration 9 --bgm-type random --bgm-volume 0.08 --no-subtitle-enabled --video-count 1 | tee ../testimonial-result.json
@@ -133,6 +133,8 @@ jobs:
           print('duration',d,'size',size,'bytes',b)
           assert 33 <= d <= 37
           assert size == (1080,1920)
+          for i,t in enumerate([3,10,19,27,33],1):
+              clip.save_frame(f'../frame-{i:02d}.jpg',t=t)
           clip.close()
           PY
 
@@ -143,4 +145,5 @@ jobs:
             TESTIMONIAL_V1_FINAL.mp4
             testimonial-result.json
             testimonial-task-id.txt
+            frame-*.jpg
           retention-days: 1
