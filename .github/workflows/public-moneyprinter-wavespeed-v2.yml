@@ -24,7 +24,7 @@ jobs:
         run: |
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/ws-private.pem >/dev/null 2>&1
           openssl pkey -in /tmp/ws-private.pem -pubout -out wavespeed-public.pem >/dev/null 2>&1
-          echo "KEY_PATH=.github/wavespeed-key-${GITHUB_RUN_ID}.b64" >> "$GITHUB_ENV"
+          echo "KEY_PATH=.github/wavespeed-key-${GITHUB_RUN_ID}.hex" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -37,20 +37,20 @@ jobs:
           FOUND=0
           for i in {1..180}; do
             git fetch origin main >/dev/null 2>&1 || true
-            if git show "origin/main:${KEY_PATH}" > /tmp/ws-key.b64 2>/dev/null; then
+            if git show "origin/main:${KEY_PATH}" > /tmp/ws-key.hex 2>/dev/null; then
               FOUND=1
               break
             fi
             sleep 5
           done
           test "$FOUND" = "1"
-          base64 -d /tmp/ws-key.b64 > /tmp/ws-key.enc
+          tr -d '\r\n ' < /tmp/ws-key.hex | xxd -r -p > /tmp/ws-key.enc
           openssl pkeyutl -decrypt -inkey /tmp/ws-private.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in /tmp/ws-key.enc -out /tmp/ws-key.txt
           WS_KEY=$(cat /tmp/ws-key.txt)
           test -n "$WS_KEY"
           echo "::add-mask::$WS_KEY"
           echo "WAVESPEED_API_KEY=$WS_KEY" >> "$GITHUB_ENV"
-          rm -f /tmp/ws-key.enc /tmp/ws-key.txt
+          rm -f /tmp/ws-key.enc /tmp/ws-key.txt /tmp/ws-key.hex
 
       - name: Download MoneyPrinterTurbo
         run: git clone --depth 1 https://github.com/harry0703/MoneyPrinterTurbo.git app
